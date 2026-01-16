@@ -1,0 +1,367 @@
+{
+  "workflow_id": "oceania_shipping_setup",
+  "workflow_name": "Setup Oceania Shipping Zone with Flat Rate",
+  "workflow_description": "Creates a new shipping zone for Oceania region, adds Australia and New Zealand, and configures a $15 flat rate shipping method",
+  "platform": "vendure",
+  "platform_version": "2.x",
+  "api_type": "graphql",
+  "total_steps": 4,
+  
+  "semantic_mappings": {
+    "user_terms_to_api": {
+      "Oceania": {
+        "api_field": "name",
+        "data_type": "string",
+        "transformation": "direct_mapping"
+      },
+      "Australia": {
+        "api_field": "members",
+        "data_type": "country_id",
+        "transformation": "lookup_country_by_name",
+        "notes": "Need to query countries first to get ID - probably follows T_ pattern based on Vendure conventions"
+      },
+      "New Zealand": {
+        "api_field": "members",
+        "data_type": "country_id", 
+        "transformation": "lookup_country_by_name",
+        "notes": "Same lookup process as Australia"
+      },
+      "Flat Rate": {
+        "api_field": "calculator.code",
+        "mapped_value": "default-shipping-calculator",
+        "notes": "Found this in shipping calculator docs - it's the plugin code for flat rate pricing"
+      },
+      "$15": {
+        "api_field": "calculator.arguments.rate",
+        "original_value": 15,
+        "mapped_value": 1500,
+        "transformation": "multiply_by_100_convert_to_string",
+        "notes": "Vendure stores prices as cents (integer), but ConfigArgs need string values"
+      }
+    }
+  },
+  
+  "steps": [
+    {
+      "step_id": "step_0_prerequisite",
+      "step_name": "Lookup Country IDs",
+      "step_description": "Query the countries collection to get IDs for Australia and New Zealand",
+      "api_operation_type": "query",
+      "api_operation": "countries",
+      "ui_equivalent": "This happens behind the scenes when user selects countries from dropdown",
+      "depends_on": [],
+      
+      "graphql_query": "query GetCountries {\n  countries {\n    items {\n      id\n      code\n      name\n    }\n  }\n}",
+      
+      "expected_response": {
+        "data": {
+          "countries": {
+            "items": [
+              {"id": "COUNTRY_ID_FORMAT_TBD", "code": "AU", "name": "Australia"},
+              {"id": "COUNTRY_ID_FORMAT_TBD", "code": "NZ", "name": "New Zealand"}
+            ]
+          }
+        }
+      },
+      
+      "outputs": {
+        "australia_id": {
+          "extract_from": "items where code == 'AU', take id field",
+          "used_in_steps": ["step_2"]
+        },
+        "new_zealand_id": {
+          "extract_from": "items where code == 'NZ', take id field", 
+          "used_in_steps": ["step_2"]
+        }
+      },
+      
+      "notes": "Not sure of exact ID format - could be numeric, UUID, or Vendure's T_ pattern. Would verify this first thing with live access."
+    },
+    
+    {
+      "step_id": "step_1",
+      "step_name": "Create Shipping Zone",
+      "step_description": "Creates the 'Oceania' zone",
+      "api_operation_type": "mutation",
+      "api_operation": "createZone",
+      "ui_equivalent": "Settings → Zones → Create Zone button → Enter name 'Oceania' → Save",
+      "depends_on": [],
+      
+      "graphql_operation": {
+        "mutation": "mutation CreateZone($input: CreateZoneInput!) {\n  createZone(input: $input) {\n    id\n    name\n  }\n}",
+        "variables": {
+          "input": {
+            "name": "Oceania"
+          }
+        }
+      },
+      
+      "inputs": {
+        "name": {
+          "source": "user_input",
+          "value": "Oceania",
+          "data_type": "String!",
+          "validation": "Required field, can't be empty"
+        }
+      },
+      
+      "expected_response": {
+        "data": {
+          "createZone": {
+            "id": "ZONE_ID_FROM_SYSTEM",
+            "name": "Oceania"
+          }
+        }
+      },
+      
+      "outputs": {
+        "zone_id": {
+          "extract_from": "data.createZone.id",
+          "used_in_steps": ["step_2", "step_3"]
+        }
+      },
+      
+      "error_handling": {
+        "duplicate_name": "If zone named 'Oceania' already exists, either use existing or prompt user to choose different name"
+      }
+    },
+    
+    {
+      "step_id": "step_2", 
+      "step_name": "Add Countries to Zone",
+      "step_description": "Adds Australia and New Zealand as members of the Oceania zone",
+      "api_operation_type": "mutation",
+      "api_operation": "addMembersToZone",
+      "ui_equivalent": "Open Oceania zone → Add members → Select Australia → Select New Zealand → Save",
+      "depends_on": ["step_0_prerequisite", "step_1"],
+      
+      "graphql_operation": {
+        "mutation": "mutation AddMembers($zoneId: ID!, $memberIds: [ID!]!) {\n  addMembersToZone(zoneId: $zoneId, memberIds: $memberIds) {\n    id\n    name\n    members {\n      id\n      name\n      code\n    }\n  }\n}",
+        "variables": {
+          "zoneId": "OUTPUT_FROM_STEP_1",
+          "memberIds": ["OUTPUT_FROM_STEP_0_AU", "OUTPUT_FROM_STEP_0_NZ"]
+        }
+      },
+      
+      "inputs": {
+        "zoneId": {
+          "source": "step_1_output",
+          "reference": "zone_id from step 1",
+          "data_type": "ID!"
+        },
+        "memberIds": {
+          "source": "step_0_output",
+          "reference": "country IDs from prerequisite lookup",
+          "data_type": "[ID!]!",
+          "notes": "Array of country IDs - user said 'Australia' and 'New Zealand' but API needs their IDs"
+        }
+      },
+      
+      "expected_response": {
+        "data": {
+          "addMembersToZone": {
+            "id": "SAME_ZONE_ID",
+            "name": "Oceania",
+            "members": [
+              {"id": "AU_ID", "name": "Australia", "code": "AU"},
+              {"id": "NZ_ID", "name": "New Zealand", "code": "NZ"}
+            ]
+          }
+        }
+      },
+      
+      "outputs": {
+        "confirmation": {
+          "extract_from": "data.addMembersToZone.members",
+          "purpose": "Verify both countries were added successfully"
+        }
+      }
+    },
+    
+    {
+      "step_id": "step_3",
+      "step_name": "Create Flat Rate Shipping Method", 
+      "step_description": "Creates a $15 flat rate shipping method for the Oceania zone",
+      "api_operation_type": "mutation",
+      "api_operation": "createShippingMethod",
+      "ui_equivalent": "Settings → Shipping Methods → Create → Fill form → Save",
+      "depends_on": ["step_1"],
+      
+      "graphql_operation": {
+        "mutation": "mutation CreateShippingMethod($input: CreateShippingMethodInput!) {\n  createShippingMethod(input: $input) {\n    id\n    code\n    name\n    calculator {\n      code\n      args {\n        name\n        value\n      }\n    }\n    checker {\n      code\n      args {\n        name\n        value\n      }\n    }\n  }\n}",
+        "variables": {
+          "input": {
+            "code": "oceania-flat-rate",
+            "fulfillmentHandler": "manual-fulfillment",
+            "checker": {
+              "code": "default-shipping-eligibility-checker",
+              "arguments": [
+                {"name": "orderMinimum", "value": "0"}
+              ]
+            },
+            "calculator": {
+              "code": "default-shipping-calculator",
+              "arguments": [
+                {"name": "rate", "value": "1500"},
+                {"name": "taxRate", "value": "0"}
+              ]
+            },
+            "translations": [
+              {
+                "languageCode": "en",
+                "name": "Oceania Flat Rate",
+                "description": "Flat rate shipping for Oceania region"
+              }
+            ]
+          }
+        }
+      },
+      
+      "inputs": {
+        "code": {
+          "source": "generated",
+          "value": "oceania-flat-rate",
+          "generation_rule": "lowercase zone name + method type, spaces to hyphens",
+          "validation": "Must match ^[a-z0-9-]+$ pattern",
+          "notes": "User doesn't provide this - we generate it"
+        },
+        "fulfillmentHandler": {
+          "source": "default",
+          "value": "manual-fulfillment",
+          "notes": "Required field but not mentioned by user - using standard default"
+        },
+        "checker": {
+          "source": "default_configuration",
+          "notes": "This determines when shipping is available. Setting orderMinimum to 0 means available for all orders",
+          "breakdown": {
+            "code": "default-shipping-eligibility-checker",
+            "orderMinimum": "0 (no minimum order value required)"
+          }
+        },
+        "calculator": {
+          "source": "user_input_transformed",
+          "notes": "User said '$15 flat rate' which maps to this whole structure",
+          "breakdown": {
+            "code": "default-shipping-calculator (found in docs - it's the flat rate plugin)",
+            "rate": "1500 (user's $15 converted to cents as string)",
+            "taxRate": "0 (assuming no tax for simplicity - might need adjustment)"
+          }
+        },
+        "translations": {
+          "source": "user_input",
+          "notes": "Even for English-only sites, Vendure requires translations array",
+          "languageCode": "en",
+          "name": "Oceania Flat Rate",
+          "description": "Generated description based on zone + method type"
+        }
+      },
+      
+      "expected_response": {
+        "data": {
+          "createShippingMethod": {
+            "id": "SHIPPING_METHOD_ID",
+            "code": "oceania-flat-rate",
+            "name": "Oceania Flat Rate",
+            "calculator": {
+              "code": "default-shipping-calculator",
+              "args": [
+                {"name": "rate", "value": "1500"},
+                {"name": "taxRate", "value": "0"}
+              ]
+            },
+            "checker": {
+              "code": "default-shipping-eligibility-checker",
+              "args": [
+                {"name": "orderMinimum", "value": "0"}
+              ]
+            }
+          }
+        }
+      },
+      
+      "outputs": {
+        "shipping_method_id": {
+          "extract_from": "data.createShippingMethod.id",
+          "used_in_steps": ["step_4"]
+        }
+      },
+      
+      "complexity_notes": {
+        "hidden_complexity": "The UI just shows 'Flat Rate' and '$15', but the API needs this whole ConfigurableOperation structure with codes and arguments",
+        "plugin_architecture": "Calculator and checker are actually plugins - Vendure allows custom implementations",
+        "argument_format": "Even though rate is numeric (1500), it must be sent as string in ConfigArg"
+      }
+    },
+    
+    {
+      "step_id": "step_4",
+      "step_name": "Assign Shipping Method to Zone",
+      "step_description": "Links the shipping method to the Oceania zone (might be automatic via channel, needs verification)",
+      "api_operation_type": "mutation",
+      "api_operation": "NEEDS_VERIFICATION",
+      "ui_equivalent": "Probably happens automatically when creating shipping method, or through zone selection in UI",
+      "depends_on": ["step_1", "step_3"],
+      
+      "uncertainty": {
+        "confidence_level": "LOW - 40%",
+        "issue": "Documentation doesn't clearly show how shipping methods get assigned to zones",
+        "possibilities": [
+          "Might be automatic through channel configuration",
+          "Might need explicit assignShippingMethodsToChannel mutation",
+          "Might be configured through zone selector that I haven't found",
+          "Could be a many-to-many relationship managed differently"
+        ],
+        "next_steps": "Would test this first with live system - create method and check if it appears for zone, or if additional step needed"
+      },
+      
+      "potential_mutation": {
+        "name": "assignShippingMethodsToChannel",
+        "notes": "Saw this mentioned in docs but signature unclear",
+        "would_test": "mutation {\n  assignShippingMethodsToChannel(\n    input: {\n      shippingMethodIds: [SHIPPING_METHOD_ID_FROM_STEP_3]\n      channelId: DEFAULT_CHANNEL_ID\n      zoneId: ZONE_ID_FROM_STEP_1\n    }\n  ) { id }\n}"
+      }
+    }
+  ],
+  
+  "execution_flow": {
+    "sequence": [
+      "Step 0: Lookup country IDs (prerequisite)",
+      "Step 1: Create zone (independent)",
+      "Step 2: Add countries (depends on 0 and 1)",
+      "Step 3: Create shipping method (depends on 1)", 
+      "Step 4: Zone assignment (UNCLEAR - needs investigation)"
+    ],
+    "parallel_possible": "Steps 2 and 3 could potentially run in parallel after step 1, but sequential is safer"
+  },
+  
+  "validation": {
+    "post_execution_checks": [
+      "Query the zone to confirm it has 2 members (AU and NZ)",
+      "Query shipping methods to confirm rate is 1500",
+      "Test checkout flow to see if Oceania shipping appears for AU/NZ addresses",
+      "Verify calculator configuration is correct"
+    ]
+  },
+  
+  "assumptions_and_uncertainties": {
+    "assumptions": [
+      "Default channel exists and is being used",
+      "Country IDs are stable and returned by countries query",
+      "taxRate can be 0 (docs show this in examples)",
+      "manual-fulfillment is the correct default handler",
+      "Zone-to-method relationship might be automatic"
+    ],
+    "needs_verification": [
+      "Exact country ID format (T_1 pattern? UUID? numeric?)",
+      "Whether step 4 is actually needed or automatic",
+      "If there are any channel-specific configurations required",
+      "Error messages when code already exists or name is duplicate"
+    ],
+    "confidence_by_step": {
+      "step_0": "85% - standard query pattern",
+      "step_1": "95% - straightforward, well documented",
+      "step_2": "90% - clear mutation signature", 
+      "step_3": "80% - complex but documented, uncertain about some defaults",
+      "step_4": "40% - unclear if needed at all"
+    }
+  }
+}
