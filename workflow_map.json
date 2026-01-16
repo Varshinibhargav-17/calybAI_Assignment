@@ -340,28 +340,5 @@
       "Test checkout flow to see if Oceania shipping appears for AU/NZ addresses",
       "Verify calculator configuration is correct"
     ]
-  },
-  
-  "assumptions_and_uncertainties": {
-    "assumptions": [
-      "Default channel exists and is being used",
-      "Country IDs are stable and returned by countries query",
-      "taxRate can be 0 (docs show this in examples)",
-      "manual-fulfillment is the correct default handler",
-      "Zone-to-method relationship might be automatic"
-    ],
-    "needs_verification": [
-      "Exact country ID format (T_1 pattern? UUID? numeric?)",
-      "Whether step 4 is actually needed or automatic",
-      "If there are any channel-specific configurations required",
-      "Error messages when code already exists or name is duplicate"
-    ],
-    "confidence_by_step": {
-      "step_0": "85% - standard query pattern",
-      "step_1": "95% - straightforward, well documented",
-      "step_2": "90% - clear mutation signature", 
-      "step_3": "80% - complex but documented, uncertain about some defaults",
-      "step_4": "40% - unclear if needed at all"
-    }
   }
 }
